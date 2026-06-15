@@ -47,7 +47,7 @@ def sphere_to_cart(phi, rho, theta):
 
 #processing each lidar laser for a given timestamp
 
-def laser_process(laser_num: int, df, df_rgc, df_seg, timestamp):
+def laser_process(laser_num: int, df, df_rgc, timestamp, df_seg=None):
 
     #df == lidar folder (range image points)
     #df_rgc == calibration folder (angle of each lidar sensor)
@@ -65,15 +65,24 @@ def laser_process(laser_num: int, df, df_rgc, df_seg, timestamp):
 
     if laser_calib["[LiDARCalibrationComponent].beam_inclination.values"].iloc[0] is not None:
         theta_series = laser_calib["[LiDARCalibrationComponent].beam_inclination.values"].iloc[0]
+        theta_series = theta_series[::-1]       #because beam_inclination values are in increasing order, so reverse it for laser 1
 
     else:
         max_inclin = laser_calib["[LiDARCalibrationComponent].beam_inclination.max"].iloc[0]
         min_inclin = laser_calib["[LiDARCalibrationComponent].beam_inclination.min"].iloc[0]
         theta_series = np.linspace(max_inclin, min_inclin, num=laser_shape[0])
     
+    #extrinsic matrix — read here because the azimuth grid needs the sensor's yaw,
+    #and reused below for the sensor -> global transform
+    ex_transform = np.array(laser_calib["[LiDARCalibrationComponent].extrinsic.transform"].iloc[0]).reshape(4, 4)
+
+    #the range image columns are aligned to the vehicle's forward axis, so we subtract
+    #this sensor's mounting yaw (atan2 of the extrinsic rotation) to get true azimuth
+    az_correction = np.arctan2(ex_transform[1, 0], ex_transform[0, 0])
+
     #converting to cartesian from spherical range image
     theta_array = np.array(theta_series)
-    phi_array = np.linspace(np.pi, np.pi * -1, num=laser_shape[1])
+    phi_array = np.linspace(np.pi, np.pi * -1, num=laser_shape[1]) - az_correction
 
     #range channel / masking
     range_channel = laser_lidar_t_grid[:, :, 0]
@@ -91,9 +100,6 @@ def laser_process(laser_num: int, df, df_rgc, df_seg, timestamp):
     Z = Z_unmasked[range_mask]
     
     #extrinsic transformation (to make it global relative to the scene instead of the sensor)
-    ex_transform_df= laser_calib["[LiDARCalibrationComponent].extrinsic.transform"].iloc[0]
-    ex_transform = np.array((ex_transform_df)).reshape(4, 4)
-
     points = np.column_stack((X, Y, Z))
     homo_coords = np.column_stack((points, np.ones(len(X))))
 
@@ -104,22 +110,27 @@ def laser_process(laser_num: int, df, df_rgc, df_seg, timestamp):
     #drop 4th column to get the global X, Y, Z coords
     global_coords = global_coords_1[:, :3]
 
-    #process segmentation labels 
-    laser_seg = df_seg.loc[df_seg["key.laser_name"] == int(laser_num)]
-    if not laser_seg.empty:
-        laser_seg_t = laser_seg.loc[laser_seg["key.frame_timestamp_micros"] == timestamp]
-        if laser_seg_t.empty:
-            return global_coords, np.zeros(len(global_coords), dtype=int)
-    else: 
-        return global_coords, np.zeros(len(global_coords), dtype=int) 
-    seg_shape = tuple(laser_seg_t["[LiDARSegmentationLabelComponent].range_image_return1.shape"].iloc[0])
-    laser_seg_t_grid = laser_seg_t["[LiDARSegmentationLabelComponent].range_image_return1.values"].iloc[0].reshape(seg_shape)
-    
-    #mask the seg grid to get the true segmentation labels of each X, Y, Z
-    seg_grid_masked = laser_seg_t_grid[range_mask]
-    seg_grid_masked_coords = seg_grid_masked[:, 1]
 
-    return global_coords, seg_grid_masked_coords
+    if df_seg is not None:
+        #process segmentation labels 
+        laser_seg = df_seg.loc[df_seg["key.laser_name"] == int(laser_num)]
+        if not laser_seg.empty:
+            laser_seg_t = laser_seg.loc[laser_seg["key.frame_timestamp_micros"] == timestamp]
+            if laser_seg_t.empty:
+                return global_coords, np.zeros(len(global_coords), dtype=int)
+        else: 
+            return global_coords, np.zeros(len(global_coords), dtype=int) 
+        seg_shape = tuple(laser_seg_t["[LiDARSegmentationLabelComponent].range_image_return1.shape"].iloc[0])
+        laser_seg_t_grid = laser_seg_t["[LiDARSegmentationLabelComponent].range_image_return1.values"].iloc[0].reshape(seg_shape)
+        
+        #mask the seg grid to get the true segmentation labels of each X, Y, Z
+        seg_grid_masked = laser_seg_t_grid[range_mask]
+        seg_grid_masked_coords = seg_grid_masked[:, 1]
+
+        return global_coords, seg_grid_masked_coords
+    
+    else:
+        return global_coords, None
 
 
 
