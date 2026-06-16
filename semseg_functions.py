@@ -202,6 +202,19 @@ def timestamp_aligner(file_path, timestamp):
 def scene_processor(scene_base_path, seg_timestamp_index, lidar_timestamp_index):
     lidar_scene_animation = []
 
+    lidar_cols = [
+        "key.laser_name",
+        "key.frame_timestamp_micros",
+        "[LiDARComponent].range_image_return1.values",
+        "[LiDARComponent].range_image_return1.shape",
+    ]
+    seg_cols = [
+        "key.laser_name",
+        "key.frame_timestamp_micros",
+        "[LiDARSegmentationLabelComponent].range_image_return1.values",
+        "[LiDARSegmentationLabelComponent].range_image_return1.shape",
+    ]
+
     seg_file_path = os.path.join(os.path.dirname(seg_timestamp_index[0][0]), scene_base_path)
     lidar_file_path = os.path.join(os.path.dirname(lidar_timestamp_index[0][0]), scene_base_path)
 
@@ -215,7 +228,7 @@ def scene_processor(scene_base_path, seg_timestamp_index, lidar_timestamp_index)
     lidar_df_timestamps = set()
 
     for i in range(seg_pq.num_row_groups):
-        seg_df = seg_pq.read_row_group(i).to_pandas()
+        seg_df = seg_pq.read_row_group(i, columns=seg_cols).to_pandas()
 
         for timestamp in seg_df["key.frame_timestamp_micros"].unique():
             #new lidar row group only when the current one doesn't cover this timestamp
@@ -226,7 +239,7 @@ def scene_processor(scene_base_path, seg_timestamp_index, lidar_timestamp_index)
                     lidar_times = lidar_pq.read_row_group(j, columns=["key.frame_timestamp_micros"]).to_pandas()
                     if lidar_times["key.frame_timestamp_micros"].isin([timestamp]).any():
                         
-                        lidar_df = lidar_pq.read_row_group(j).to_pandas()
+                        lidar_df = lidar_pq.read_row_group(j, columns=lidar_cols).to_pandas()
                         lidar_df_timestamps = set(lidar_df["key.frame_timestamp_micros"].unique())
                         break
 
