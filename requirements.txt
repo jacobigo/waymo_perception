@@ -1,0 +1,33 @@
+# 3D Semantic Segmentation & LiDAR-Camera Fusion — pinned dependencies
+# Python 3.10. Versions captured from the working .venv.
+#   pip install -r requirements.txt
+
+# --- Data access (parquet + live GCS) ---
+pyarrow==24.0.0
+gcsfs==2026.5.0
+google-cloud-storage==3.10.1
+
+# --- Core numerics / dataframes ---
+numpy==2.2.6
+pandas==2.3.3
+
+# --- Visualization ---
+matplotlib==3.10.9
+plotly==6.7.0
+Pillow==12.2.0
+open3d==0.19.0
+
+# --- Imported by the helper module ---
+tensorflow==2.21.0
+
+# --- Notebook environment ---
+jupyterlab==4.5.7
+ipykernel==7.2.0
+
+# --- Model training (PyTorch) ---
+# NOTE: these are CUDA 12.4 builds. Plain `pip install` pulls the CPU build.
+# For GPU, install torch/torchvision from the PyTorch index first, e.g.:
+#   pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+# then run `pip install -r requirements.txt` for the rest.
+torch==2.6.0
+torchvision==0.21.0

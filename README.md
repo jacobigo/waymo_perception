@@ -1,277 +1,137 @@
-# 3D Semantic Segmentation & LiDAR-Camera Sensor Fusion - by Jacob Igo
+# 3D Semantic Segmentation & LiDAR-Camera Fusion
 
+**by Jacob Igo**
 
+> Learning how self-driving perception actually works — building 3D semantic segmentation and sensor fusion from scratch on the Waymo Open Dataset, without the Waymo Python package and with minimal LLM help.
 
-> _Learning how perception works with the Waymo Open Perception Dataset, by performing 3D Semantic Segmentation and Sensor Fusion from scratch, without the Waymo Python package and extremely minimal LLM assistance._
-> <!-- TODO: e.g. "A learning-focused exploration of 3D semantic segmentation on the Waymo Open Dataset, extended into early LiDAR-camera sensor fusion." -->
-
-<img src="media/sensor_fusion_no_labels.gif" alt="demo" width="600">
-<!-- TODO: swap in your best still frame or GIF once the labeled-fusion render is done. -->
+<img src="media/sensor_fusion_no_labels.gif" alt="LiDAR projected onto camera, colored by depth" width="600">
 
 ---
 
-## Table of Contents
+## Why I'm doing this
 
-- [Motivation](#motivation)
-- [Dataset](#dataset)
-- [What I've Built So Far](#what-ive-built-so-far)
-- [Technical Deep-Dives](#technical-deep-dives)
-- [Pipeline & Project Structure](#pipeline--project-structure)
-- [Sensor Fusion](#sensor-fusion)
-- [Challenges & Lessons Learned](#challenges--lessons-learned)
-- [Roadmap](#roadmap)
-- [Setup & Running](#setup--running)
-- [References](#references)
+I grew up in Phoenix watching Waymo go from a novelty to something I ride whenever I get the chance, and I'm convinced autonomous vehicles are one of the more important things being built right now — safer roads, and genuinely fascinating tech. I want to work in this field, and the best way I know to understand something is to rebuild it myself.
+
+So this is me taking raw sensor data and turning it into a labeled 3D scene, one piece at a time, learning the geometry and the gotchas along the way. It's a learning project, and I'm having a great time with it.
 
 ---
 
-## Motivation
+## The data
 
-<!-- TODO: Why did you start this? What did you want to learn?
-     A few sentences on your goals: understanding how raw sensor data becomes
-     a labeled 3D scene, learning the geometry/math behind it, etc.
-     This is a learning project — say so, and say what "done" looks like to you. -->
+**Waymo Open Dataset v2.0**, read live from the `waymo_open_dataset_v_2_0_0` GCS bucket — no local copies, and no Waymo package. I parse the parquet files directly with PyArrow.
 
-I am very interested in autonomous vehicles and want to pursue it for a career, as I believe there is a strong potential market for them one day due to their game-changing safety and convenience 
-
-(, and because I think the tech is beyond fascinating. Having grown up in Phoenix, AZ, I've seen Waymo grow tremendously and I always use their services when I have the chance to. This is the future).
-
-Therefore, I want to learn how self-driving cars work, and what better way to do it than through recreating their functions. 
-
-This is one of the first steps in my journey of learning the ins and outs of self-driving cars, and I'm having a great time.
-
----
-
-## Dataset
-
-**Waymo Open Dataset v2.0** (`waymo_open_dataset_v_2_0_0` GCS bucket).
-
-<!-- TODO: In your own words, describe the data you're working with. Cover:
-     - What one parquet file represents (~20s driving segment)
-     - The sensors: 5 LiDARs, 5 cameras
-     - The range-image format (not raw x/y/z)
-     - The 23 semantic classes
-     - That you access it directly via pyarrow + GcsFileSystem (no waymo package) -->
-
-_This holds the lidar points along with their labels, calibration data, and the corresponding image frames. These are the folders I am working with (for now, I will be using more throughout this project)._
+Each file is one 20-second driving segment with 5 LiDARs and 5 cameras per frame. LiDAR comes as **range images** (azimuth / inclination / range), not raw XYZ, so it needs a spherical-to-Cartesian conversion first. Labels are 23 semantic classes, and only laser 1 is labeled.
 
 | Folder | What it holds |
 |---|---|
-| `lidar/` | Range Image 3D points |
-| `lidar_segmentation/` | Lidar Labels |
-| `lidar_calibration/` | Extrinsic Matrices per Laser |
-| `camera_image/` | Images per Timestamp |
-| `camera_calibration/` | Extrinsic / Intrinsic Matrices |
-
-
----
-
-## What I've Built So Far
-
-<!-- TODO: Turn this into an honest checklist of what's working. Check the boxes
-     you've actually completed. This is the "what I've done" half of the story. -->
-
-- [ ] GCS authentication & parquet access
-- [ ] Range-image decode (spherical → Cartesian)
-- [ ] Extrinsic transform to a global frame
-- [ ] Multi-laser fusion into one point cloud
-- [ ] Segmentation-label decoding & per-point coloring
-- [ ] Memory-safe, timestamp-aligned data loading
-- [ ] Bird's-eye + 3D (Plotly) visualization
-- [ ] Scene animation (matplotlib / ffmpeg)
-- [ ] LiDAR → camera projection
-- [ ] LiDAR-camera fused overlay video
-- [ ] Labeled sensor-fusion render
-- [ ] _..._
+| `lidar/` | Range-image 3D points |
+| `lidar_segmentation/` | Per-point labels (laser 1 only) |
+| `lidar_calibration/` | Extrinsics + beam inclinations per laser |
+| `camera_image/` | JPEG frames per timestamp |
+| `camera_calibration/` | Camera intrinsics + extrinsics |
 
 ---
 
-## Technical Deep-Dives
+## What works so far
 
-<!-- This is the heart of the README — where you show you actually understand
-     the machinery, not just that it runs. For each topic, explain the concept
-     in your own words and note what tripped you up. Short is fine; clarity matters. -->
-
-### Range Images → 3D Points (Spherical → Cartesian)
-
-<!-- TODO: What is a range image? What are azimuth (phi), inclination (theta),
-     and range (rho)? How do you convert them to X/Y/Z? -->
-
-Converting spherical coordinates (phi, theta, rho: range image format) to cartesian (x, y, z) was a refresher from Calculus III, and a welcome one since I found a worthy application of it. This is necessary for plotting in a 3D space, as well as for future model training.
-
-### Beam Inclination & Azimuth Correction
-
-<!-- TODO: Why beam inclinations need reversing for laser 1, and why the azimuth
-     grid must be corrected by the sensor's mounting yaw. This was a real bug —
-     describe what went wrong and how you found it. -->
-
-This was a challenge that I realized deep into development, as I didn't know that the sensor had a mounting yaw, and had to apply this to the azimuth (phi) calculation. This made the everything swing on the wrong bearing, which ruined the segmentation plotting. I realized it was necessary to apply this transformation to get the correct image.
-
-For beam inclination, I assumed the beam values were in descending order, but were actually ascending, so this capped my height to a wrong value when plotting.
-
-### Extrinsic Transform (Sensor → Vehicle/Global Frame)
-
-<!-- TODO: What the 4x4 extrinsic matrix does, and how homogeneous coordinates
-     let you apply it as a single matrix multiply. -->
-
-The extrinsic matrix is for the camera and lidar sensors, as it relates the position of these sensors so that their measured points can be represented relative to them (or global, not relative to them). 
-
-To use these with the points, we must stack the X, Y, and Z coordinates in a numpy array, then add a 1's column to the right to make it 4xN (homogeneous) after transposing, then do a matrix multiple by the extrinsic matrix, and finally get rid of the 4th added column. 
-
-### Segmentation Labels
-
-<!-- TODO: Label tensor layout (instance vs semantic channel), the fact that
-     only laser 1 is labeled, and how labels stay aligned to points through masking. -->
-
-After inspecting the data with pandas, I noticed that the segmentation labels are pretty sparse: only about 30 timestamps compared to 198 for lidar, as well as only laser 1 containing labels. 
-
-To get these labels, there is a Masking that has to be done to get only true values (values that are actually visible, non negative) after converting. 
-
-### LiDAR → Camera Projection
-
-<!-- TODO: world → camera-local (inverse extrinsic), perspective divide by depth,
-     intrinsic scaling (f_u/f_v/c_u/c_v), behind-camera and in-bounds masking.
-     This is the core of the fusion work. -->
-
-To get the already-processed 3D global coordinates relative to the camera we are taking frames from, we must:
-
-1. Multiply the 3D global coords by the inverse of the extrinsic matrix for the camera.
-
-2. Divide by the depth (X axis in this case) to get a normalized set of 2D coords (u, v)
-
-3. Scale by the intrinsic values of the camera (focal length, lens centerpoint)
-
-Finally, you take these (u, v) coordinates and do a masking that only takes points within the bounds of the image dimensions. 
+- [x] Range-image decode (spherical → Cartesian)
+- [x] Extrinsic transform to a global frame
+- [x] Multi-laser fusion into one point cloud
+- [x] Segmentation labels decoded & points colored by class
+- [x] Memory-safe, timestamp-aligned data loading
+- [x] Bird's-eye and interactive 3D (Plotly) visualization
+- [x] Scene animations (matplotlib / ffmpeg)
+- [x] LiDAR → camera projection
+- [x] Fused overlay video (colored by depth)
+- [ ] Labeled sensor-fusion render — *in progress*
 
 ---
 
-## Pipeline & Project Structure
+## A few things I learned
+
+**Range images to 3D points.** The LiDAR isn't XYZ; it's spherical (phi, theta, rho). Converting it back to Cartesian was a nice callback to Calc III, and the first time I've applied that math to a real problem.
+
+**Beam inclination & azimuth yaw (, or, the cricket chirping in a dark room).** My point clouds kept coming out wrong and the fused overlay sat too high on the image. I assumed the beam inclinations were in descending order (they weren't), which capped the vertical spread; and I didn't know the sensor has a mounting yaw that has to be subtracted from the azimuth, which was swinging the whole cloud onto the wrong bearing. Finding these taught me to trust the geometry and check my assumptions about how the data is stored.
+
+**Extrinsic transforms.** The 4×4 extrinsic relates a sensor's measurements to the vehicle/global frame. You stack XYZ, add a row of ones to go homogeneous, multiply by the matrix, and drop the extra row.
+
+**LiDAR with camera projection.** Multiply the global points by the inverse camera extrinsic to get camera-local coords, divide by depth, scale by the intrinsics (focal length plus principal point), then keep only the points that land in front of the camera and inside the image. Hard to implement labels in this process due to sparsity in the datset.
+
+---
+
+## Sensor fusion
+
+I'm doing **early fusion**: projecting LiDAR onto the camera image and (as of now) coloring the beams by depth. The current render is verified aligned (after the beam/yaw fixes above). Next up is coloring by semantic class on the 30 (give or take per scene) labeled frames and falling back to depth on the rest, since labels are too sparse to interpolate across frames honestly. Late fusion is a later experiment.
+
+---
+
+## Model training
+
+Now I'm training a model to predict the labels that I previously only read.
+
+**PointNet baseline (in progress).** Each frame is subsampled to 4,096 points and every point is classified into one of the 23 classes. PointNet treats the cloud as an *unordered* set: per-point convolution layers describe each point, a global max-pool summarizes the whole scene, and that is then fed back to every point so it labels itself knowing both itself (local) and the scene (global). Used weighted cross-entropy (with class 0 ignored) to beat the heavy class imbalance, as well as per-class **mIoU** rather than accuracy as the base metric, and disk-caching processed frames so epochs stop re-streaming from GCS. Rare classes are still near zero; next step is PointNet++.
+
+**Sensor-fusion model (later).** Give each point its camera color too — widen the input from XYZ to XYZ + RGB (plus a validity flag for points no camera sees) and measure the **mIoU gain** from adding appearance to geometry.
+
+---
+
+## Project layout
 
 | File | Role |
 |---|---|
-| `semseg.ipynb` | Semantic Segmentation |
-| `semseg_functions.py` | SemSeg functions |
-| `sensor_fusion.ipynb` | Sensor Fusion learning |
-| `sensor_fusion_functions.py` | Fusion functions |
-| `media/` | videos/plots generated |
-
-<!-- TODO (optional): a small diagram or bullet flow of how data moves:
-     parquet row group → decode → transform → fuse → project → render. -->
-
-
----
-
-## Sensor Fusion
-
-<!-- TODO: Describe the early-fusion approach: projecting labeled 3D points onto
-     the 2D camera image. Note the dual-coloring strategy for sparse labels
-     (semantic color where labels exist, depth fallback elsewhere) and why label
-     interpolation across frames isn't viable. -->
-
-This implementation does an Early Fusion approach, but I will try Late Fusion in the future. We are using depth to measure and color the Lidar beams overlayed on top of the image (working on segmentation labels actively, TBD)
-
----
-
-## Challenges & Lessons Learned
-
-<!-- TODO: This section is gold for showing learning. Be specific and honest.
-     Candidates from your journey:
-     - The swapped azimuth/elevation meshgrid bug (wrong cloud shape)
-     - The "overlay too high" bug (beam order + azimuth yaw)
-     - Kernel crashes from reloading huge LiDAR row groups
-     - Dropped animation frames hitting matplotlib's embed limit
-     - Memory-safe row-group batching
-     For each: what broke, how you diagnosed it, what you learned. -->
-
-1. Memory Usage
-
-- My first implementations of the data retrieval and processing algorithms were very sub-optimal, and it led to my kernel crashing quite often, so I tried to think of ways to minimize my data usage while still getting demonstrative results.
-
-- Issues included retrieving large files multiple times for only a small portion of their data, holding large dataframes in memory for too long, and loading unnecessary columns that went unused.
-
-- FIX: being memory efficient and doing processing/projecting immediately after loading to not hold too much data in memory. Also using the "del" keyword and the garbage collector to delete data that that wasn't necesarry in the loop.
-
-
-2. Unaligned LiDAR and Camera for Fusion video
-
-- The lidar points were too high up on the image, and it took me a while to figure out that there was a root issue in my lidar processing function, which had to do with height correction along with azimuth.
-
-- FIX: I had to reverse the theta series array because I assumed it would be in descending order, but was actually in ascending, which changed my point cloud direction change when iterating over timestamps. 
-
-- FIX: I had to do a small transformation to the azimuth calculation to factor in the yaw of the sensor, which translated it to be visualized at the correct angle relative to the camera.
+| `semseg.ipynb` | LiDAR-only segmentation pipeline |
+| `sensor_fusion.ipynb` | LiDAR-camera fusion |
+| `semseg_modeling.ipynb` | PointNet training |
+| `semseg_functions.py` | Shared helpers |
+| `media/` | Generated videos and plots |
 
 ---
 
 ## Roadmap
 
-<!-- TODO: The "what I plan to do" half. Order by what's next. Candidates:
-     - Integrate seg labels into the fused render (dual-coloring)
-     - 3D bounding-box visualization
-     - Aggregate labeled frames across many segments
-     - Train a 3D semantic-segmentation model
-     - Finish modularizing helpers into the *_functions.py files -->
-
-- [ ] _Next: Implementing predefined segmentation labels into the sensor fusion pipeline._
-- [ ] _Later: Creating a model to detect labels from each relevant sensor output._
-- [ ] _Eventually: Running optimized versions of these perception functions in a CARLA simulator to evaluate my progress, and iterate from there._
+- **Now:** tuning the PointNet baseline; then upgrading to PointNet++
+- **Next:** semantic labels in the fused render (dual-coloring), then a fusion segmentation model (geometry + camera RGB)
+- **Eventually:** run these perception pieces in a CARLA sim to evaluate and iterate
 
 ---
 
-## Setup & Running
+## Running it
 
-<!-- TODO: How someone (including future-you) gets this running:
-     - Python / environment / key dependencies (pyarrow, pandas, numpy, etc.)
-     - gcloud auth requirement (token expires after 1 hour)
-     - Which notebook to open and run -->
+Python 3.10, notebook-driven, data read live from GCS (no local copies).
 
-**Environment:** Python 3.10, run inside Jupyter (these are notebook-driven).
+**1. Install the dependencies** (plus `ffmpeg` on your PATH for the animations):
 
-**Python dependencies:** `pyarrow` (parquet + GCS filesystem access), `pandas`,
-`numpy`, `matplotlib`, `Pillow` (JPEG decode), `plotly` (interactive 3D),
-`tensorflow` and `open3d` (imported by the helper module), plus `gcsfs` and
-`google-cloud-storage`. Install them into a Python 3.10 environment with your
-package manager of choice.
+```bash
+pip install -r requirements.txt
+sudo apt install ffmpeg   # or: brew install ffmpeg
+```
 
-**System dependency:** `ffmpeg` must be on your PATH — the scene/fusion
-animations are written to disk with matplotlib's `FFMpegWriter`.
+For GPU training, install the CUDA build of PyTorch first (see the note in `requirements.txt`); a plain install pulls the CPU-only build.
 
-**Google Cloud authentication:** The data is read live from the public GCS
-bucket `waymo_open_dataset_v_2_0_0` — there are no local copies. Authentication
-goes through the Google Cloud SDK: sign in once with the `gcloud auth login` flow,
-and make sure `gcloud` is installed (this project expects it at `/usr/bin/gcloud`,
-with config under `/home/jacob/.config/gcloud` — adjust the two paths at the top
-of `semseg_functions.py` for your machine). On import, the helper module shells
-out to `gcloud auth print-access-token` and builds the `GcsFileSystem` from that
-token. **The token expires after one hour**, so for long sessions you'll need to
-re-import the module (or re-run its first cell) to refresh it.
+**2. Authenticate with Google Cloud** — the helpers shell out to `gcloud`, so make sure it's installed and logged in:
 
-**Running it:** Open `semseg.ipynb` for the LiDAR-only segmentation pipeline, or
-`sensor_fusion.ipynb` for the LiDAR-camera fusion work, and run the cells top to
-bottom. Generated videos and plots land in `media/`.
+```bash
+gcloud auth login
+gcloud auth print-access-token   # sanity check: should print a token
+```
+
+The token **expires after an hour**, so re-run the notebook's auth cell (or re-import the helper module) for long sessions. Paths to `gcloud` and its config are set at the top of `semseg_functions.py` — adjust them for your machine.
+
+**3. Launch Jupyter and run a notebook top to bottom:**
+
+```bash
+jupyter lab   # then open semseg.ipynb or sensor_fusion.ipynb
+```
+
+- `semseg.ipynb` — LiDAR-only segmentation pipeline
+- `sensor_fusion.ipynb` — LiDAR-camera fusion
+
+Generated videos and plots land in `media/`.
 
 ---
 
 ## References
 
-<!-- TODO: Links and resources that helped you. Candidates:
-     - Waymo Open Dataset docs / paper
-     - Camera intrinsics / extrinsics / pinhole model references
-     - Spherical-to-Cartesian / range-image explanations -->
-
-**Dataset**
-- [Waymo Open Dataset — official site](https://waymo.com/open/)
-- [Waymo Open Dataset v2.0 documentation](https://waymo.com/open/data/perception/)
-- Sun et al., *Scalability in Perception for Autonomous Driving: Waymo Open Dataset*, CVPR 2020 — [arXiv:1912.04838](https://arxiv.org/abs/1912.04838)
-
-**Data access**
-- [Apache Arrow / PyArrow — reading Parquet](https://arrow.apache.org/docs/python/parquet.html)
-- [PyArrow filesystems — Google Cloud Storage](https://arrow.apache.org/docs/python/filesystems.html#google-cloud-storage-file-system)
-- [gcloud auth print-access-token reference](https://cloud.google.com/sdk/gcloud/reference/auth/print-access-token)
-
-**Geometry & projection**
-- [OpenCV camera calibration & 3D reconstruction (pinhole model, intrinsics/extrinsics)](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html)
-- [Spherical coordinate system (azimuth / inclination / radius)](https://en.wikipedia.org/wiki/Spherical_coordinate_system)
-- [Homogeneous coordinates](https://en.wikipedia.org/wiki/Homogeneous_coordinates)
-
-<!-- TODO: add any blog posts, videos, or docs that personally helped you click. -->
-- _..._
+- [Waymo Open Dataset](https://waymo.com/open/) · [v2.0 docs](https://waymo.com/open/data/perception/) · Sun et al., *Waymo Open Dataset*, CVPR 2020 ([arXiv:1912.04838](https://arxiv.org/abs/1912.04838))
+- [PyArrow: Parquet](https://arrow.apache.org/docs/python/parquet.html) · [PyArrow: GCS filesystem](https://arrow.apache.org/docs/python/filesystems.html#google-cloud-storage-file-system)
+- [OpenCV pinhole model / calibration](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html) · [Spherical coordinates](https://en.wikipedia.org/wiki/Spherical_coordinate_system) · [Homogeneous coordinates](https://en.wikipedia.org/wiki/Homogeneous_coordinates)

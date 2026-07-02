@@ -28,7 +28,18 @@ token = subprocess.check_output(
 from datetime import datetime, timezone, timedelta
 fs = pafs.GcsFileSystem(access_token=token, credential_token_expiration=datetime.now(timezone.utc) + timedelta(hours=1))
 
+def refresh_gcs():
+    token = subprocess.check_output(
+        ["/usr/bin/gcloud", "auth", "print-access-token"]
+    ).decode().strip()
+    new_fs = pafs.GcsFileSystem(
+        access_token=token,
+        credential_token_expiration=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    globals()["fs"] = new_fs
+    return new_fs
 
+fs = refresh_gcs()
 
 #to convert spherical coordinates to cartesian
 
@@ -170,6 +181,14 @@ def folder_file_indexer(folder, start_folder_index, end_folder_index):
 #dataframe function to fetch row groups with the same timestamp between files (lidar and seg)
 
 def timestamp_aligner(file_path, timestamp):
+    try:
+        return timestamp_aligner_helper(file_path, timestamp)
+    except:
+        refresh_gcs()
+        return timestamp_aligner_helper(file_path, timestamp)
+
+
+def timestamp_aligner_helper(file_path, timestamp):
     file_pq = pq.ParquetFile(file_path, filesystem=fs)
     for i in range(file_pq.num_row_groups):
         rg_time = file_pq.read_row_group(i, columns=["key.frame_timestamp_micros"])
@@ -178,7 +197,6 @@ def timestamp_aligner(file_path, timestamp):
             rg_all = file_pq.read_row_group(i)
             df_all = rg_all.to_pandas()
             return df_all
-
 
 # === USAGE ===
 # seg_test_file, seg_test_timestamp = seg_timestamp_index[100]
